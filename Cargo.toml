@@ -1,6 +1,6 @@
 [package]
 name = "steam_guard"
-version = "1.0.0"
+version = "1.0.1"
 authors = ["SFort <github@ssf.tf>"]
 description = "A Simple TOTP crate intended for steam guard authentication"
 documentation = "https://docs.rs/crate/steam_guard"

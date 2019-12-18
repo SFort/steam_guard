@@ -72,11 +72,11 @@ pub fn from_bytes(key: &[u8], time: &u64) -> u32 {
 ///returns the time in seconds in which the currently valid authentication code will expire
 ///and the next one will be valid
 pub fn expires_in_sec() -> u64 {
-    std::time::SystemTime::now()
+    30 - (std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_secs()
-        % 30
+        % 30)
 }
 ///takes steams Base64 encoded shared_secret value decodes it and generates the 5 digit code that
 ///steam requires in order to authenticate your login
