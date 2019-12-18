@@ -1,4 +1,16 @@
-///Easy to use library for authenticating with steams TOTP
+//Simple crate for authenticating with steams TOTP
+//!# steam_guard
+//!Is used to easily get steam guards authentication code.
+//!provided you have the shared secret
+//!#### Usage:
+//!```
+//!extern crate steam_guard;
+//!let secret = "123123123Ab=";
+//!println!("Expires in:{}s", steam_guard::expires_in_sec());
+//!println!("Login with:{:?}", steam_guard::from_secret(secret));
+//!println!("Next login code:{:?}", steam_guard::from_secret_future(secret, 1));
+//!
+//!```
 #[cfg(feature = "base64")]
 extern crate base64;
 extern crate sha1;
@@ -57,6 +69,8 @@ pub fn from_bytes(key: &[u8], time: &u64) -> u32 {
         | (hash[offset + 2] as u32) << 8
         | (hash[offset + 3] as u32)) as u32
 }
+///returns the time in seconds in which the currently valid authentication code will expire
+///and the next one will be valid
 pub fn expires_in_sec() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -64,6 +78,8 @@ pub fn expires_in_sec() -> u64 {
         .as_secs()
         % 30
 }
+///takes steams Base64 encoded shared_secret value decodes it and generates the 5 digit code that
+///steam requires in order to authenticate your login
 #[cfg(feature = "base64")]
 pub fn from_secret(secret: &str) -> Result<String, base64::DecodeError> {
     let key = base64::decode(secret)?;
@@ -74,6 +90,9 @@ pub fn from_secret(secret: &str) -> Result<String, base64::DecodeError> {
         / 30;
     Ok(totp_to_steam_code(from_bytes(&key, &time)))
 }
+///same as from_secret
+///but the second argument allows you to get codes that will be valid in the future
+///setting the second argument to 0 would be the same as calling from_secret
 #[cfg(feature = "base64")]
 pub fn from_secret_future(secret: &str, offset: u64) -> Result<String, base64::DecodeError> {
     let key = base64::decode(secret)?;
