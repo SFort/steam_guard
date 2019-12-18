@@ -8,6 +8,8 @@ repository = "https://github.com/SFort/steam_guard"
 readme = "README.md"
 categories = ["authentication"]
 keywords = ["steam", "totp", "login"]
+license = "MIT"
+license-file = "LICENSE"
 
 [features]
 default = ["base64"]
