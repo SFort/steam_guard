@@ -1,3 +1,4 @@
+### *this github repo has beta versions, stick to using the ones on crates.io
 # steam_guard
 Is used to easily get steam guards authentication code.
 provided you have the shared secret

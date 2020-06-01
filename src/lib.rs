@@ -14,7 +14,9 @@
 #[cfg(feature = "base64")]
 extern crate base64;
 extern crate sha1;
-
+pub const VERSION: &'static str = env!("CARGO_PKG_VERSION");
+#[cfg(feature = "steam_web")]
+pub mod web;
 pub fn totp_to_steam_code(mut totp_result: u32) -> String {
     let steam_chars = [
         "2", "3", "4", "5", "6", "7", "8", "9", "B", "C", "D", "F", "G", "H", "J", "K", "M", "N",
