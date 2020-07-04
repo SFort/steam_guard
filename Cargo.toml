@@ -1,6 +1,6 @@
 [package]
 name = "steam_guard"
-version = "1.1.0-beta36"
+version = "1.1.0-beta37"
 authors = ["SFort <github@ssf.tf>"]
 description = "A Simple TOTP crate intended for steam guard authentication"
 documentation = "https://docs.rs/crate/steam_guard"
@@ -12,8 +12,10 @@ license = "MIT"
 license-file = "LICENSE"
 
 [features]
-default = ["base64"]
+default = ["base64","version"]
 steam_web = ["base64", "num-bigint","tinyjson"]
+version = []
+root = []
 
 [dependencies]
 sha1 = "0.6.0"

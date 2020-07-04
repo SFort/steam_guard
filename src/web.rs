@@ -1,20 +1,19 @@
 //Used to obtain the required cookies and OAuth token
 #[cfg(feature = "base64")]
 extern crate base64;
-#[cfg(feature = "getrandom")]
-extern crate getrandom;
 #[cfg(feature = "num-bigint")]
 extern crate num_bigint;
 #[cfg(feature = "tinyjson")]
 extern crate tinyjson;
+#[cfg(feature = "num-bigint")]
 use self::num_bigint::BigUint;
+#[cfg(feature = "tinyjson")]
 use self::tinyjson::JsonValue;
-use std::{
-    collections::HashMap,
-    io,
-    time::{SystemTime, UNIX_EPOCH},
-};
+use root::web::{send_request, urlencode};
+use std::{collections::HashMap, io};
+
 #[derive(Default)]
+#[cfg(feature = "steam_web")]
 pub struct UserLogin {
     pub name: String,
     pub pass: String,
@@ -27,9 +26,12 @@ pub struct UserLogin {
     pub req_totp: Option<String>,
     pub server_time: Option<i64>,
 }
+/// steamcommunity.com
+pub const IP_COMM: &'static str = "steamcommunity.com";
+/// api.steampowered.com
+pub const IP_API: &'static str = "api.steampowered.com";
+#[cfg(feature = "steam_web")]
 impl UserLogin {
-    pub const IP_COMM: &'static str = "steamcommunity.com";
-    pub const IP_API: &'static str = "api.steampowered.com";
     pub fn new<S>(name: S, pass: S) -> Self
     where
         S: Into<String>,
@@ -43,7 +45,8 @@ impl UserLogin {
 
     //TODO test some more
     ///As far as I can tell the session is irrelavent and should be avoided
-    ///stream should link to UserLogin::IP_COMM
+    ///
+    ///stream should link to [IP_COMM](constant.IP_COMM.html)
     pub fn set_session<S: io::Read + io::Write>(
         &mut self,
         stream: &mut S,
@@ -57,19 +60,21 @@ impl UserLogin {
         match send_request(
             stream,
             b"GET /login HTTP/1.0",
-            Self::IP_COMM.as_bytes(),
+            IP_COMM.as_bytes(),
             &self.web_cookies,
             b"",
         ) {
             Ok(r) => {
-                self.web_cookies.extend(parse_response(&r).0);
+                self.web_cookies
+                    .extend(super::root::web::parse_response(&r).0);
                 Ok(())
             }
             Err(e) => Err(e),
         }
     }
     ///Should be called if there is any doubt that sys time is accurate
-    ///stream should link to UserLogin::IP_API
+    ///
+    ///stream should link to [UserLogin::IP_API](constant.IP_API.html)
     pub fn set_offset<S: io::Read + io::Write>(
         &mut self,
         stream: &mut S,
@@ -82,7 +87,7 @@ impl UserLogin {
         &self,
         stream: &mut S,
     ) -> Result<(BigUint, BigUint, String), Box<dyn std::error::Error>> {
-        let json = parse_response(&send_request(
+        let json = super::root::web::parse_response(&send_request(
             stream,
             b"POST /login/getrsakey HTTP/1.0",
             b"steamcommunity.com",
@@ -102,9 +107,17 @@ impl UserLogin {
         .1;
         Ok((
             //TODO handle parse_bytes unwrap
-            BigUint::parse_bytes(get_json_string(&json, "publickey_exp")?.as_bytes(), 16).unwrap(),
-            BigUint::parse_bytes(get_json_string(&json, "publickey_mod")?.as_bytes(), 16).unwrap(),
-            get_json_string(&json, "timestamp")?,
+            BigUint::parse_bytes(
+                super::root::web::get_json_string(&json, "publickey_exp")?.as_bytes(),
+                16,
+            )
+            .unwrap(),
+            BigUint::parse_bytes(
+                super::root::web::get_json_string(&json, "publickey_mod")?.as_bytes(),
+                16,
+            )
+            .unwrap(),
+            super::root::web::get_json_string(&json, "timestamp")?,
         ))
     }
     //TODO test, no clue if this works
@@ -125,7 +138,7 @@ impl UserLogin {
         } else {
             1
         },
-        pad_encrypt(&self.pass,&rsa.0,&rsa.1),
+        super::root::crypto::pad_encrypt(&self.pass,&rsa.0,&rsa.1),
         &self.name,
         &rsa.2,
     )
@@ -140,7 +153,7 @@ impl UserLogin {
         encrypted_pass: &str,
         timestamp: &str,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        parse_response(&send_request(
+        super::root::web::parse_response(&send_request(
         stream,
     b"POST /login/dologin HTTP/1.0",
     b"steamcommunity.com",
@@ -161,14 +174,20 @@ impl UserLogin {
         Ok(())
     }
 }
+//TODO
+//maybe get rid of tinyjson dep by adding an alternate compile in root
+//this is getting overcomplicated but importing a library for this one function
+//does not sit well with me
+#[cfg(feature = "tinyjson")]
 pub fn get_time_offset<S: io::Read + io::Write>(
     stream: &mut S,
 ) -> Result<i64, Box<dyn std::error::Error>> {
-    Ok((get_json_string(
-        &parse_response(&send_request(
+    use std::time::SystemTime;
+    Ok((super::root::web::get_json_string(
+        &super::root::web::parse_response(&send_request(
             stream,
             b"POST /ITwoFactorService/QueryTime/v0001 HTTP/1.0",
-            UserLogin::IP_API.as_bytes(),
+            IP_API.as_bytes(),
             &HashMap::new(),
             b"",
         )?)
@@ -176,160 +195,9 @@ pub fn get_time_offset<S: io::Read + io::Write>(
         "server_time",
     )?
     .parse::<i128>()?
-    .saturating_sub(SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() as i128)) as i64)
-}
-fn pad_encrypt(password: &str, exponent: &BigUint, modulus: &BigUint) -> String {
-    let mut padding = std::vec::Vec::with_capacity(modulus.bits() / 8);
-    padding.push(0);
-    padding.push(2);
-    add_rand_bytes(&mut padding, (modulus.bits() / 8) - 3 - password.len());
-    padding.push(0);
-    padding.extend_from_slice(password.as_bytes());
-    urlencode(&base64::encode(
-        &(BigUint::from_bytes_be(&padding).modpow(exponent, modulus)).to_bytes_be(),
-    ))
-}
-//TODO this seems wrong, re-do it again
-fn get_json_string(json: &JsonValue, key: &str) -> Result<String, error::JsonNull> {
-    Ok(json[key]
-        .get::<String>()
-        .ok_or(error::JsonNull { key: key.into() })?
-        .into())
-}
-
-fn add_rand_bytes(vec: &mut Vec<u8>, range: usize) {
-    #[cfg(feature = "getrandom")]
-    {
-        let mut buf = vec![0u8; range];
-        if getrandom::getrandom(&mut buf).is_ok() {
-            for i in 0..range {
-                if buf[i] == 0 {
-                    buf[i] = 1;
-                }
-            }
-            vec.extend(buf);
-            return;
-        }
-    }
-    for i in 0..range {
-        vec.push(
-            ((if let Ok(time) = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH) {
-                time.as_nanos() % 256
-            } else {
-                i as u128
-            } ^ 571)
-                % 255) as u8
-                + 1,
-        );
-    }
-}
-fn urlencode(data: &str) -> String {
-    data.chars()
-        .fold(String::with_capacity(data.len()), |rez, x| match x {
-            'A'..='Z' | 'a'..='z' | '0'..='9' | '-' | '_' | '.' | '~' => rez + &x.to_string(),
-            _ => format!("{}%{:02X}", rez, x as u8),
-        })
-}
-
-fn send_request<S: io::Read + io::Write>(
-    stream: &mut S,
-    start: &[u8],
-    host: &[u8],
-    cookies: &HashMap<Vec<u8>, Vec<u8>>,
-    body: &[u8],
-) -> Result<Vec<u8>, io::Error> {
-    stream.write_all(
-        &[
-            start,
-            b"\r\nHost: ",
-            host,
-            b"\nX-Requested-With: com.valvesoftware.android.steam.community",
-            if cookies.is_empty() {
-                &[]
-            } else {
-                b"\nCookie:"
-            },
-            &cookies.iter().fold(Vec::new(), |rez, (key, value)| {
-                let mut key = key.clone();
-                key.push(b'=');
-                key.extend(value);
-                if rez.is_empty() {
-                    [rez, vec![b' '], key].concat().clone()
-                } else {
-                    [rez, vec![b';', b' '], key].concat().clone()
-                }
-            }),
-            &if start.starts_with(b"POST") {
-                format!(
-            "\nContent-Type: application/x-www-form-urlencoded; charset=UTF-8\nContent-Length: {}",
-            body.len()
-        )
-                .into_bytes()
-            } else {
-                Vec::new()
-            },
-            b"\r\n\r\n",
-            body,
-        ]
-        .concat(),
-    )?;
-    let mut res = vec![];
-    stream.read_to_end(&mut res)?;
-    Ok(res)
-}
-//TODO needs optimization
-fn parse_response(bytes: &Vec<u8>) -> (HashMap<Vec<u8>, Vec<u8>>, JsonValue) {
-    let mut result = HashMap::new();
-    for x in 12..bytes.len() {
-        if bytes[x - 11] == b'\n' {
-            if b"Set-Cookie" == &bytes[(x - 10)..(x)] {
-                let mut end_row = None;
-                let mut split = None;
-                for i in x..bytes.len() {
-                    if split.is_none() {
-                        if bytes[i] == b'=' {
-                            split = Some(i)
-                        }
-                    }
-                    if bytes[i] == b'\n' || bytes[i] == b';' {
-                        end_row = Some(i);
-                        break;
-                    };
-                }
-                if let Some(split) = split {
-                    if let Some(end_row) = end_row {
-                        result.insert(
-                            bytes[(x + 1)..(split)].to_vec(),
-                            bytes[(split + 1)..(end_row)].to_vec(),
-                        );
-                    }
-                }
-            }
-            if (bytes[x - 12], bytes[x - 10], bytes[x - 9]) == (13, 13, 10) {
-                return (
-                    result,
-                    String::from_utf8_lossy(&bytes[(x - 8)..bytes.len()])
-                        .parse::<JsonValue>()
-                        .unwrap_or(JsonValue::Null),
-                );
-            }
-        }
-    }
-    (result, JsonValue::Null)
-}
-mod error {
-    #[derive(Debug, Clone)]
-    pub struct JsonNull {
-        pub key: String,
-    }
-    impl std::fmt::Display for JsonNull {
-        fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-            write!(f, "No json value with key: {}", self.key)
-        }
-    }
-    impl std::error::Error for JsonNull {
-        fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-            None
-        }
-    }
+    .saturating_sub(
+        SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)?
+            .as_secs() as i128,
+    )) as i64)
 }
